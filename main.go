@@ -30,12 +30,21 @@ func getNotesDir() string {
 		return root
 	}
 
-	// Try config file
-	configPath := "config.yaml"
-	if data, err := os.ReadFile(configPath); err == nil {
-		var config Config
-		if err := yaml.Unmarshal(data, &config); err == nil && config.NotesDir != "" {
-			return config.NotesDir
+	// Try config files in order of preference
+	homeDir, _ := os.UserHomeDir()
+	configPaths := []string{
+		"config.yaml",
+		"config.yml",
+		filepath.Join(homeDir, ".config", "obsidian-tasks", "config.yaml"),
+		filepath.Join(homeDir, ".config", "obsidian-tasks", "config.yml"),
+	}
+
+	for _, configPath := range configPaths {
+		if data, err := os.ReadFile(configPath); err == nil {
+			var config Config
+			if err := yaml.Unmarshal(data, &config); err == nil && config.NotesDir != "" {
+				return config.NotesDir
+			}
 		}
 	}
 
