@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Go CLI tool called `obsidian-tasks` that scans Obsidian markdown files for recurring tasks defined with RRULE (RFC 5545) in YAML front matter. It displays active and inactive tasks based on the current date and recurrence rules.
+This is a Go CLI tool called `obsidian-tasks` that scans Obsidian markdown files for recurring tasks defined with iCal RRULE + DURATION semantics in YAML front matter. It displays active and inactive tasks with smart date indicators including due dates and next start dates.
 
 ## Development Commands
 
@@ -32,28 +32,41 @@ The application requires a notes directory to be configured through:
 
 ### Core Components
 - **main.go** - Single-file application containing all logic
-- **FrontMatter struct** - Handles YAML parsing for `rrule` and `tags` fields
+- **FrontMatter struct** - Handles YAML parsing for `rrule`, `duration`, `dtstart`, and `tags` fields
+- **Task struct** - Represents task with name, rrule, duration, next start date, and due date
 - **Config struct** - Manages notes directory configuration
 
 ### Key Functions
 - `getNotesDir()` - Configuration resolution with fallback hierarchy
-- `processFile(path)` - Extracts and formats task information from markdown files
-- `isTaskActive(path)` - Determines if a task is active today using RRULE evaluation
+- `parseFrontMatter(path)` - Common YAML front matter parsing (eliminates duplication)
+- `processFile(path)` - Creates Task struct with all metadata including dates
+- `isTaskActive(path)` - Determines if task is active using RRULE + DURATION window logic
+- `getNextOccurrence(fm)` - Calculates next start date for inactive tasks
+- `getCurrentDueDate(fm)` - Calculates due date for currently active tasks
+- `parseDuration(str)` - Parses ISO 8601 duration format (P1D, P1W, PT2H, etc.)
+- `parseStartDate(str)` - Parses dtstart with fallback to 1 year ago
+- `printTasks()` - Unified display with color-coded date indicators
 - `cleanFilename(filename)` - Removes date prefixes and file extensions for display
 
+### Task Logic (RRULE + DURATION)
+1. **RRULE** generates recurring occurrence dates from dtstart
+2. **DURATION** defines active window length for each occurrence
+3. **Active Task**: Today falls within any occurrence's [start, start+duration) window
+4. **Due Date**: Last day of current active window (start + duration - 1 day)
+5. **Next Start**: First occurrence date after today
+6. **Default**: dtstart = 1 year ago, duration = P1D (1 day)
+
 ### Dependencies
-- `github.com/fatih/color` - Terminal color output
+- `github.com/fatih/color` - Terminal color output with date highlighting
 - `github.com/teambition/rrule-go` - RFC 5545 recurrence rule parsing
 - `gopkg.in/yaml.v3` - YAML front matter parsing
 
-### File Processing Logic
-1. Walks through all `.md` files in the configured notes directory
-2. Parses YAML front matter for `rrule` field
-3. Evaluates RRULE against current date to determine task status
-4. Displays active tasks in green and inactive tasks in gray
-5. Cleans filenames by removing date prefixes for better readability
+### Display Features
+- **Active Tasks**: Show due dates with red warning (⚠️) if due today, yellow arrow (→) otherwise
+- **Inactive Tasks**: Show next start dates with cyan arrow (→)
+- **Color Scheme**: Green (active names), red (urgent due), yellow (due dates), cyan (next start), gray (inactive)
 
 ### Cross-Platform Build
-- Configured for Linux, Windows, macOS
-- Supports multiple architectures (386, amd64, arm, arm64)
-- Uses goreleaser for release automation
+- Simplified goreleaser configuration
+- Supports: linux/amd64, linux/arm64, windows/amd64
+- Archives: tar.gz (Linux), zip (Windows)

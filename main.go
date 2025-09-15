@@ -22,9 +22,11 @@ type FrontMatter struct {
 }
 
 type Task struct {
-	Name     string
-	RRule    string
-	Duration string
+	Name      string
+	RRule     string
+	Duration  string
+	NextStart *time.Time
+	DueDate   *time.Time
 }
 
 type Config struct {
@@ -105,6 +107,26 @@ func printTasks(title string, tasks []Task, nameColor color.Attribute) {
 		if task.Duration != "" {
 			color.New(color.Reset).Print(", " + task.Duration)
 		}
+
+		// Show due date for active tasks
+		if nameColor == color.FgGreen && task.DueDate != nil {
+			today := time.Now().Truncate(24 * time.Hour)
+			dateStr := task.DueDate.Format("2006-01-02")
+
+			if task.DueDate.Equal(today) {
+				// Red highlight if due today
+				color.New(color.FgRed, color.Bold).Print(" ⚠️ " + dateStr)
+			} else {
+				// Normal color for future due dates
+				color.New(color.FgYellow).Print(" → " + dateStr)
+			}
+		}
+
+		// Show next start date for inactive tasks
+		if nameColor == color.FgHiBlack && task.NextStart != nil {
+			color.New(color.FgCyan).Print(" → " + task.NextStart.Format("2006-01-02"))
+		}
+
 		color.New(color.Reset).Println(")")
 	}
 }
@@ -222,6 +244,64 @@ func parseDuration(durationStr string) (time.Duration, error) {
 	return duration, nil
 }
 
+func getNextOccurrence(fm *FrontMatter) *time.Time {
+	if fm.RRule == "" {
+		return nil
+	}
+
+	today := time.Now().Truncate(24 * time.Hour)
+	startDate := parseStartDate(fm.DTStart)
+
+	r, err := rrule.StrToRRule("DTSTART:" + startDate.Format("20060102T000000Z") + "\nRRULE:" + fm.RRule)
+	if err != nil {
+		return nil
+	}
+
+	// Get next occurrence after today
+	nextOccurrences := r.Between(today.Add(24*time.Hour), today.AddDate(1, 0, 0), true)
+	if len(nextOccurrences) > 0 {
+		next := nextOccurrences[0].Truncate(24 * time.Hour)
+		return &next
+	}
+
+	return nil
+}
+
+func getCurrentDueDate(fm *FrontMatter) *time.Time {
+	if fm.RRule == "" {
+		return nil
+	}
+
+	today := time.Now().Truncate(24 * time.Hour)
+	startDate := parseStartDate(fm.DTStart)
+	duration, err := parseDuration(fm.Duration)
+	if err != nil {
+		return nil
+	}
+
+	r, err := rrule.StrToRRule("DTSTART:" + startDate.Format("20060102T000000Z") + "\nRRULE:" + fm.RRule)
+	if err != nil {
+		return nil
+	}
+
+	// Find current active occurrence and its due date
+	endDate := today.Add(duration)
+	occurrences := r.Between(startDate, endDate, true)
+
+	for _, occurrence := range occurrences {
+		occurrenceStart := occurrence.Truncate(24 * time.Hour)
+		occurrenceEnd := occurrenceStart.Add(duration)
+
+		// If today falls within this occurrence's window, return its due date
+		if (today.Equal(occurrenceStart) || today.After(occurrenceStart)) && today.Before(occurrenceEnd) {
+			dueDate := occurrenceEnd.Add(-24 * time.Hour) // Last day of active period
+			return &dueDate
+		}
+	}
+
+	return nil
+}
+
 func parseStartDate(dtStartStr string) time.Time {
 	if dtStartStr == "" {
 		// Default to 1 year ago
@@ -257,7 +337,9 @@ func processFile(path string) Task {
 
 	if fm.RRule != "" {
 		filename := cleanFilename(filepath.Base(path))
-		return Task{Name: filename, RRule: fm.RRule, Duration: fm.Duration}
+		nextStart := getNextOccurrence(fm)
+		dueDate := getCurrentDueDate(fm)
+		return Task{Name: filename, RRule: fm.RRule, Duration: fm.Duration, NextStart: nextStart, DueDate: dueDate}
 	}
 	return Task{}
 }
