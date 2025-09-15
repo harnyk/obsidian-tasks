@@ -1,0 +1,19 @@
+module obsidian-tasks
+
+go 1.24.0
+
+require (
+	github.com/fatih/color v1.18.0
+	github.com/teambition/rrule-go v1.8.2
+	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	github.com/BurntSushi/toml v0.3.1 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/nicksnyder/go-i18n/v2 v2.1.1 // indirect
+	github.com/skillcoder/hrrule-go v0.1.0 // indirect
+	golang.org/x/sys v0.25.0 // indirect
+	golang.org/x/text v0.3.4 // indirect
+)
