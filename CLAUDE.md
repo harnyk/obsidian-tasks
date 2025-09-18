@@ -17,6 +17,16 @@ This is a Go CLI tool called `obsidian-tasks` that scans Obsidian markdown files
 - `make release-test` - Test goreleaser configuration with snapshot build
 - `goreleaser release --snapshot --clean` - Direct goreleaser test command
 
+### Release Workflow
+**Tag-based CI releases** - GitHub Actions handles releases automatically:
+1. Make code changes
+2. `git add` and `git commit` with descriptive message
+3. `git tag v1.0.x` (create version tag)
+4. `git push && git push --tags`
+5. CI automatically triggers goreleaser and creates GitHub release
+
+**Important**: Do NOT run `goreleaser release` locally - let CI handle it
+
 ### Cleanup
 - `make clean` - Remove built binary and dist artifacts
 
