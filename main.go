@@ -422,7 +422,8 @@ func processFile(path string) Task {
 	} else if fm.DTStart != "" {
 		// Handle one-time events
 		dueDate := getOneTimeDueDate(fm)
-		return Task{Name: filename, RRule: "ONCE", Duration: fm.Duration, NextStart: nil, DueDate: dueDate}
+		startDate := parseStartDate(fm.DTStart)
+		return Task{Name: filename, RRule: "ONCE", Duration: fm.Duration, NextStart: &startDate, DueDate: dueDate}
 	}
 	return Task{}
 }
