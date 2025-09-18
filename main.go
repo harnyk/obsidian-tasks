@@ -63,6 +63,12 @@ func getNotesDir() string {
 }
 
 func main() {
+	// Check for help flag
+	if len(os.Args) > 1 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
+		printHelp()
+		return
+	}
+
 	root := getNotesDir()
 
 	var activeTasks []Task
@@ -93,6 +99,45 @@ func main() {
 
 	printTasks("Active tasks", activeTasks, color.FgGreen)
 	printTasks("Inactive tasks", inactiveTasks, color.FgHiBlack)
+}
+
+func printHelp() {
+	fmt.Println("obsidian-tasks - CLI tool for managing recurring tasks in Obsidian notes")
+	fmt.Println()
+	fmt.Println("USAGE:")
+	fmt.Println("  obsidian-tasks [--help]")
+	fmt.Println()
+	fmt.Println("DESCRIPTION:")
+	fmt.Println("  Scans Obsidian markdown files for recurring tasks defined with iCal RRULE + DURATION")
+	fmt.Println("  semantics in YAML front matter. Displays active and inactive tasks with smart")
+	fmt.Println("  date indicators including due dates and next start dates.")
+	fmt.Println()
+	fmt.Println("CONFIGURATION:")
+	fmt.Println("  Set notes directory via:")
+	fmt.Println("  - OBSIDIAN_NOTES_DIR environment variable, or")
+	fmt.Println("  - Config file (config.yaml/config.yml) with 'notes_dir' field in:")
+	fmt.Println("    - Current directory")
+	fmt.Println("    - ~/.config/obsidian-tasks/")
+	fmt.Println()
+	fmt.Println("FRONT MATTER FORMAT:")
+	fmt.Println("  Recurring tasks:")
+	fmt.Println("    ---")
+	fmt.Println("    rrule: FREQ=DAILY;COUNT=5")
+	fmt.Println("    duration: P1D")
+	fmt.Println("    dtstart: 2025-01-01")
+	fmt.Println("    ---")
+	fmt.Println()
+	fmt.Println("  One-time events:")
+	fmt.Println("    ---")
+	fmt.Println("    dtstart: 2025-10-18")
+	fmt.Println("    duration: P6D")
+	fmt.Println("    ---")
+	fmt.Println()
+	fmt.Println("DURATION FORMAT:")
+	fmt.Println("  ISO 8601 duration: P1D (1 day), P1W (1 week), PT2H (2 hours), etc.")
+	fmt.Println()
+	fmt.Println("OPTIONS:")
+	fmt.Println("  -h, --help    Show this help message")
 }
 
 func printTasks(title string, tasks []Task, nameColor color.Attribute) {
@@ -302,6 +347,39 @@ func getCurrentDueDate(fm *FrontMatter) *time.Time {
 	return nil
 }
 
+func getOneTimeDueDate(fm *FrontMatter) *time.Time {
+	if fm.DTStart == "" {
+		return nil
+	}
+
+	startDate := parseStartDate(fm.DTStart)
+	duration, err := parseDuration(fm.Duration)
+	if err != nil {
+		return nil
+	}
+
+	dueDate := startDate.Add(duration).Add(-24 * time.Hour) // Last day of active period
+	return &dueDate
+}
+
+func isOneTimeTaskActive(fm *FrontMatter) bool {
+	if fm.DTStart == "" {
+		return false
+	}
+
+	today := time.Now().Truncate(24 * time.Hour)
+	startDate := parseStartDate(fm.DTStart)
+	duration, err := parseDuration(fm.Duration)
+	if err != nil {
+		return false
+	}
+
+	endDate := startDate.Add(duration)
+
+	// Check if today falls within the event's active window
+	return (today.Equal(startDate) || today.After(startDate)) && today.Before(endDate)
+}
+
 func parseStartDate(dtStartStr string) time.Time {
 	if dtStartStr == "" {
 		// Default to 1 year ago
@@ -335,11 +413,16 @@ func processFile(path string) Task {
 		return Task{}
 	}
 
+	filename := cleanFilename(filepath.Base(path))
+
 	if fm.RRule != "" {
-		filename := cleanFilename(filepath.Base(path))
 		nextStart := getNextOccurrence(fm)
 		dueDate := getCurrentDueDate(fm)
 		return Task{Name: filename, RRule: fm.RRule, Duration: fm.Duration, NextStart: nextStart, DueDate: dueDate}
+	} else if fm.DTStart != "" {
+		// Handle one-time events
+		dueDate := getOneTimeDueDate(fm)
+		return Task{Name: filename, RRule: "ONCE", Duration: fm.Duration, NextStart: nil, DueDate: dueDate}
 	}
 	return Task{}
 }
@@ -350,36 +433,39 @@ func isTaskActive(path string) bool {
 		return false
 	}
 
-	if fm.RRule == "" {
-		return false
-	}
-
-	today := time.Now().Truncate(24 * time.Hour)
-	startDate := parseStartDate(fm.DTStart)
-	duration, err := parseDuration(fm.Duration)
-	if err != nil {
-		return false
-	}
-
-	// Create RRULE with proper DTSTART
-	r, err := rrule.StrToRRule("DTSTART:" + startDate.Format("20060102T000000Z") + "\nRRULE:" + fm.RRule)
-	if err != nil {
-		return false
-	}
-
-	// Get all occurrences from start date to today + duration
-	// (we need to check a bit into the future in case an occurrence + duration overlaps with today)
-	endDate := today.Add(duration)
-	occurrences := r.Between(startDate, endDate, true)
-
-	// Check if today falls within any occurrence's active window
-	for _, occurrence := range occurrences {
-		occurrenceStart := occurrence.Truncate(24 * time.Hour)
-		occurrenceEnd := occurrenceStart.Add(duration)
-
-		if (today.Equal(occurrenceStart) || today.After(occurrenceStart)) && today.Before(occurrenceEnd) {
-			return true
+	if fm.RRule != "" {
+		today := time.Now().Truncate(24 * time.Hour)
+		startDate := parseStartDate(fm.DTStart)
+		duration, err := parseDuration(fm.Duration)
+		if err != nil {
+			return false
 		}
+
+		// Create RRULE with proper DTSTART
+		r, err := rrule.StrToRRule("DTSTART:" + startDate.Format("20060102T000000Z") + "\nRRULE:" + fm.RRule)
+		if err != nil {
+			return false
+		}
+
+		// Get all occurrences from start date to today + duration
+		// (we need to check a bit into the future in case an occurrence + duration overlaps with today)
+		endDate := today.Add(duration)
+		occurrences := r.Between(startDate, endDate, true)
+
+		// Check if today falls within any occurrence's active window
+		for _, occurrence := range occurrences {
+			occurrenceStart := occurrence.Truncate(24 * time.Hour)
+			occurrenceEnd := occurrenceStart.Add(duration)
+
+			if (today.Equal(occurrenceStart) || today.After(occurrenceStart)) && today.Before(occurrenceEnd) {
+				return true
+			}
+		}
+
+		return false
+	} else if fm.DTStart != "" {
+		// Handle one-time events
+		return isOneTimeTaskActive(fm)
 	}
 
 	return false
