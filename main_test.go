@@ -133,7 +133,7 @@ func TestParseDuration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result, err := parseDuration(tt.input)
+			result, err := ParseDuration(tt.input)
 			if tt.hasError {
 				if err == nil {
 					t.Errorf("Expected error for input %q, got none", tt.input)
@@ -170,5 +170,95 @@ func TestParseStartDate(t *testing.T) {
 				t.Errorf("For input %q: expected %v, got %v", tt.input, tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestParseFrontMatter(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		expected    *FrontMatter
+		expectError bool
+	}{
+		{
+			name: "valid_frontmatter",
+			content: `---
+rrule: FREQ=WEEKLY;BYDAY=FR
+duration: P1D
+dtstart: 2024-01-05
+---
+
+# Task content`,
+			expected: &FrontMatter{
+				RRule:    "FREQ=WEEKLY;BYDAY=FR",
+				Duration: "P1D",
+				DTStart:  "2024-01-05",
+				Tags:     nil,
+			},
+			expectError: false,
+		},
+		{
+			name:        "no_frontmatter",
+			content:     "# Regular markdown file",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ParseFrontMatter(tt.content)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if result.RRule != tt.expected.RRule {
+				t.Errorf("RRule: expected %q, got %q", tt.expected.RRule, result.RRule)
+			}
+		})
+	}
+}
+
+func TestPipeline_Integration(t *testing.T) {
+	// Test the full pipeline: ParseFrontMatter -> ApplyDefaults -> IsTaskActive
+	currentTime := time.Date(2025, 9, 26, 12, 0, 0, 0, time.UTC) // Friday, Sep 26, 2025
+
+	content := `---
+rrule: FREQ=WEEKLY;BYDAY=FR
+duration: P1D
+dtstart: 2024-01-05
+---
+
+# Weekly Friday Task`
+
+	// Step 1: Parse
+	fm, err := ParseFrontMatter(content)
+	if err != nil {
+		t.Fatalf("ParseFrontMatter failed: %v", err)
+	}
+
+	// Step 2: Apply defaults
+	fmWithDefaults, err := ApplyDefaults(fm, currentTime)
+	if err != nil {
+		t.Fatalf("ApplyDefaults failed: %v", err)
+	}
+
+	// Step 3: Check if active
+	isActive, err := IsTaskActive(fmWithDefaults, currentTime)
+	if err != nil {
+		t.Fatalf("IsTaskActive failed: %v", err)
+	}
+
+	// Should be active on Friday
+	if !isActive {
+		t.Errorf("Expected Friday task to be active on Friday, but got false")
 	}
 }

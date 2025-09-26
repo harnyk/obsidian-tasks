@@ -21,6 +21,13 @@ type FrontMatter struct {
 	Tags     []string `yaml:"tags"`
 }
 
+type FrontMatterWithDefaults struct {
+	RRule    string
+	Duration time.Duration
+	DTStart  time.Time
+	Tags     []string
+}
+
 type Task struct {
 	Name      string
 	RRule     string
@@ -206,13 +213,8 @@ func printTasksWithErrors(title string, tasks []Task, nameColor color.Attribute)
 	}
 }
 
-func parseFrontMatter(path string) (*FrontMatter, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read error: %w", err)
-	}
-
-	content := string(data)
+// ParseFrontMatter parses YAML frontmatter from content string
+func ParseFrontMatter(content string) (*FrontMatter, error) {
 	if !strings.HasPrefix(content, "---") {
 		return nil, fmt.Errorf("no frontmatter")
 	}
@@ -230,7 +232,17 @@ func parseFrontMatter(path string) (*FrontMatter, error) {
 	return &fm, nil
 }
 
-func parseDuration(durationStr string) (time.Duration, error) {
+// parseFrontMatter reads file and parses frontmatter (wrapper for file I/O)
+func parseFrontMatter(path string) (*FrontMatter, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read error: %w", err)
+	}
+	return ParseFrontMatter(string(data))
+}
+
+// ParseDuration parses ISO 8601 duration string
+func ParseDuration(durationStr string) (time.Duration, error) {
 	if durationStr == "" {
 		return 24 * time.Hour, nil // Default to 1 day
 	}
@@ -261,7 +273,7 @@ func parseDuration(durationStr string) (time.Duration, error) {
 		}
 
 		value := remaining[:i]
-		unit := remaining[i:i+1]
+		unit := remaining[i : i+1]
 		remaining = remaining[i+1:]
 
 		num, err := time.ParseDuration(value + "h")
@@ -295,7 +307,7 @@ func parseDuration(durationStr string) (time.Duration, error) {
 		}
 
 		value := timePart[:i]
-		unit := timePart[i:i+1]
+		unit := timePart[i : i+1]
 		timePart = timePart[i+1:]
 
 		switch unit {
@@ -349,7 +361,7 @@ func getCurrentDueDate(fm *FrontMatter) *time.Time {
 
 	today := time.Now().Truncate(24 * time.Hour)
 	startDate := parseStartDate(fm.DTStart)
-	duration, err := parseDuration(fm.Duration)
+	duration, err := ParseDuration(fm.Duration)
 	if err != nil {
 		return nil
 	}
@@ -383,7 +395,7 @@ func getOneTimeDueDate(fm *FrontMatter) *time.Time {
 	}
 
 	startDate := parseStartDate(fm.DTStart)
-	duration, err := parseDuration(fm.Duration)
+	duration, err := ParseDuration(fm.Duration)
 	if err != nil {
 		return nil
 	}
@@ -392,6 +404,20 @@ func getOneTimeDueDate(fm *FrontMatter) *time.Time {
 	return &dueDate
 }
 
+// IsOneTimeTaskActive checks if one-time task is active at given time
+func IsOneTimeTaskActive(fm *FrontMatterWithDefaults, currentTime time.Time) bool {
+	if fm.DTStart.IsZero() {
+		return false
+	}
+
+	today := currentTime.Truncate(24 * time.Hour)
+	endDate := fm.DTStart.Add(fm.Duration)
+
+	// Check if today falls within the event's active window
+	return (today.Equal(fm.DTStart) || today.After(fm.DTStart)) && today.Before(endDate)
+}
+
+// isOneTimeTaskActive wrapper for backward compatibility
 func isOneTimeTaskActive(fm *FrontMatter) bool {
 	if fm.DTStart == "" {
 		return false
@@ -399,7 +425,7 @@ func isOneTimeTaskActive(fm *FrontMatter) bool {
 
 	today := time.Now().Truncate(24 * time.Hour)
 	startDate := parseStartDate(fm.DTStart)
-	duration, err := parseDuration(fm.Duration)
+	duration, err := ParseDuration(fm.Duration)
 	if err != nil {
 		return false
 	}
@@ -410,10 +436,10 @@ func isOneTimeTaskActive(fm *FrontMatter) bool {
 	return (today.Equal(startDate) || today.After(startDate)) && today.Before(endDate)
 }
 
-func parseStartDate(dtStartStr string) time.Time {
+// ParseStartDate parses dtstart string with fallback
+func ParseStartDate(dtStartStr string, fallbackDate time.Time) time.Time {
 	if dtStartStr == "" {
-		// Default to 1 year ago
-		return time.Now().AddDate(-1, 0, 0).Truncate(24 * time.Hour)
+		return fallbackDate
 	}
 
 	// Try parsing common date formats
@@ -430,8 +456,32 @@ func parseStartDate(dtStartStr string) time.Time {
 		}
 	}
 
-	// If parsing fails, default to 1 year ago
-	return time.Now().AddDate(-1, 0, 0).Truncate(24 * time.Hour)
+	// If parsing fails, use fallback
+	return fallbackDate
+}
+
+// parseStartDate wrapper for backward compatibility
+func parseStartDate(dtStartStr string) time.Time {
+	fallback := time.Now().AddDate(-1, 0, 0).Truncate(24 * time.Hour)
+	return ParseStartDate(dtStartStr, fallback)
+}
+
+// ApplyDefaults applies default values to frontmatter
+func ApplyDefaults(fm *FrontMatter, currentTime time.Time) (*FrontMatterWithDefaults, error) {
+	duration, err := ParseDuration(fm.Duration)
+	if err != nil {
+		return nil, fmt.Errorf("duration parsing error: %w", err)
+	}
+
+	fallbackStartDate := currentTime.AddDate(-1, 0, 0).Truncate(24 * time.Hour)
+	startDate := ParseStartDate(fm.DTStart, fallbackStartDate)
+
+	return &FrontMatterWithDefaults{
+		RRule:    fm.RRule,
+		Duration: duration,
+		DTStart:  startDate,
+		Tags:     fm.Tags,
+	}, nil
 }
 
 func processFile(path string) Task {
@@ -458,22 +508,13 @@ func processFile(path string) Task {
 	return Task{}
 }
 
-func isTaskActive(path string) (bool, error) {
-	fm, err := parseFrontMatter(path)
-	if err != nil {
-		return false, nil // No front matter is not an error
-	}
+// IsTaskActive checks if task is active at given time
+func IsTaskActive(fm *FrontMatterWithDefaults, currentTime time.Time) (bool, error) {
+	today := currentTime.Truncate(24 * time.Hour)
 
 	if fm.RRule != "" {
-		today := time.Now().Truncate(24 * time.Hour)
-		startDate := parseStartDate(fm.DTStart)
-		duration, err := parseDuration(fm.Duration)
-		if err != nil {
-			return false, fmt.Errorf("duration parsing error: %w", err)
-		}
-
 		// Create RRULE with proper DTSTART
-		rruleStr := "DTSTART:" + startDate.Format("20060102T000000Z") + "\nRRULE:" + fm.RRule
+		rruleStr := "DTSTART:" + fm.DTStart.Format("20060102T000000Z") + "\nRRULE:" + fm.RRule
 		r, err := rrule.StrToRRule(rruleStr)
 		if err != nil {
 			return false, fmt.Errorf("RRULE parsing error: %w", err)
@@ -481,13 +522,13 @@ func isTaskActive(path string) (bool, error) {
 
 		// Get all occurrences from start date to today + duration
 		// (we need to check a bit into the future in case an occurrence + duration overlaps with today)
-		endDate := today.Add(duration)
-		occurrences := r.Between(startDate, endDate, true)
+		endDate := today.Add(fm.Duration)
+		occurrences := r.Between(fm.DTStart, endDate, true)
 
 		// Check if today falls within any occurrence's active window
 		for _, occurrence := range occurrences {
 			occurrenceStart := occurrence.Truncate(24 * time.Hour)
-			occurrenceEnd := occurrenceStart.Add(duration)
+			occurrenceEnd := occurrenceStart.Add(fm.Duration)
 
 			if (today.Equal(occurrenceStart) || today.After(occurrenceStart)) && today.Before(occurrenceEnd) {
 				return true, nil
@@ -495,12 +536,27 @@ func isTaskActive(path string) (bool, error) {
 		}
 
 		return false, nil
-	} else if fm.DTStart != "" {
+	} else if !fm.DTStart.IsZero() {
 		// Handle one-time events
-		return isOneTimeTaskActive(fm), nil
+		return IsOneTimeTaskActive(fm, currentTime), nil
 	}
 
 	return false, nil
+}
+
+// isTaskActive wrapper for backward compatibility (uses file I/O)
+func isTaskActive(path string) (bool, error) {
+	fm, err := parseFrontMatter(path)
+	if err != nil {
+		return false, nil // No front matter is not an error
+	}
+
+	fmWithDefaults, err := ApplyDefaults(fm, time.Now())
+	if err != nil {
+		return false, err
+	}
+
+	return IsTaskActive(fmWithDefaults, time.Now())
 }
 
 func cleanFilename(filename string) string {
