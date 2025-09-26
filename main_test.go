@@ -19,55 +19,55 @@ func TestIsTaskActive(t *testing.T) {
 		expected    bool
 		description string
 	}{
-		// 		{
-		// 			name: "monthly_task_active_1",
-		// 			frontMatter: `---
-		// rrule: FREQ=MONTHLY;BYMONTHDAY=20
-		// duration: P10D
-		// dtstart: 2024-01-20
-		// ---`,
-		// 			expected:    true,
-		// 			description: "Monthly task on 20th with 10-day duration should be active on Sep 26",
-		// 		},
-		// 		{
-		// 			name: "monthly_task_active_2",
-		// 			frontMatter: `---
-		// rrule: FREQ=MONTHLY;BYMONTHDAY=-5
-		// duration: P5D
-		// dtstart: 2024-01-26
-		// ---`,
-		// 			expected:    true,
-		// 			description: "Monthly task on last 5th day with 5-day duration should be active on Sep 26",
-		// 		},
-		// 		{
-		// 			name: "monthly_task_inactive_1",
-		// 			frontMatter: `---
-		// rrule: FREQ=MONTHLY;BYMONTHDAY=12
-		// duration: P6D
-		// dtstart: 2024-01-12
-		// ---`,
-		// 			expected:    false,
-		// 			description: "Monthly task on 12th with 6-day duration should be inactive on Sep 26",
-		// 		},
-		// 		{
-		// 			name: "monthly_task_inactive_2",
-		// 			frontMatter: `---
-		// rrule: FREQ=MONTHLY;BYMONTHDAY=1
-		// dtstart: 2024-01-01
-		// ---`,
-		// 			expected:    false,
-		// 			description: "Monthly task on 1st with default duration should be inactive on Sep 26",
-		// 		},
-		// 		{
-		// 			name: "monthly_task_inactive_3",
-		// 			frontMatter: `---
-		// rrule: FREQ=MONTHLY;BYMONTHDAY=1
-		// duration: P3D
-		// dtstart: 2024-01-01
-		// ---`,
-		// 			expected:    false,
-		// 			description: "Monthly task on 1st with 3-day duration should be inactive on Sep 26",
-		// 		},
+		{
+			name: "monthly_task_active_1",
+			frontMatter: `---
+rrule: FREQ=MONTHLY;BYMONTHDAY=20
+duration: P10D
+dtstart: 2024-01-20
+---`,
+			expected:    true,
+			description: "Monthly task on 20th with 10-day duration should be active on Sep 26",
+		},
+		{
+			name: "monthly_task_active_2",
+			frontMatter: `---
+rrule: FREQ=MONTHLY;BYMONTHDAY=-5
+duration: P5D
+dtstart: 2024-01-26
+---`,
+			expected:    true,
+			description: "Monthly task on last 5th day with 5-day duration should be active on Sep 26",
+		},
+		{
+			name: "monthly_task_inactive_1",
+			frontMatter: `---
+rrule: FREQ=MONTHLY;BYMONTHDAY=12
+duration: P6D
+dtstart: 2024-01-12
+---`,
+			expected:    false,
+			description: "Monthly task on 12th with 6-day duration should be inactive on Sep 26",
+		},
+		{
+			name: "monthly_task_inactive_2",
+			frontMatter: `---
+rrule: FREQ=MONTHLY;BYMONTHDAY=1
+dtstart: 2024-01-01
+---`,
+			expected:    false,
+			description: "Monthly task on 1st with default duration should be inactive on Sep 26",
+		},
+		{
+			name: "monthly_task_inactive_3",
+			frontMatter: `---
+rrule: FREQ=MONTHLY;BYMONTHDAY=1
+duration: P3D
+dtstart: 2024-01-01
+---`,
+			expected:    false,
+			description: "Monthly task on 1st with 3-day duration should be inactive on Sep 26",
+		},
 		{
 			name: "weekly_task_should_be_active",
 			frontMatter: `---
@@ -77,15 +77,15 @@ dtstart: 2024-01-05
 			expected:    true,
 			description: "Weekly Friday task should be active on Friday Sep 26",
 		},
-		// 		{
-		// 			name: "one_time_task_inactive",
-		// 			frontMatter: `---
-		// dtstart: 2025-10-18
-		// duration: P6D
-		// ---`,
-		// 			expected:    false,
-		// 			description: "One-time task starting Oct 18 should be inactive on Sep 26",
-		// 		},
+		{
+			name: "one_time_task_inactive",
+			frontMatter: `---
+dtstart: 2025-10-18
+duration: P6D
+---`,
+			expected:    false,
+			description: "One-time task starting Oct 18 should be inactive on Sep 26",
+		},
 	}
 
 	// Note: These tests assume the current date is Friday, September 26, 2025
