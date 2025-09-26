@@ -27,6 +27,7 @@ type Task struct {
 	Duration  string
 	NextStart *time.Time
 	DueDate   *time.Time
+	Error     error
 }
 
 type Config struct {
@@ -73,6 +74,7 @@ func main() {
 
 	var activeTasks []Task
 	var inactiveTasks []Task
+	var errorTasks []Task
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -83,7 +85,11 @@ func main() {
 		}
 		if strings.HasSuffix(d.Name(), ".md") {
 			if task := processFile(path); task.Name != "" {
-				if isTaskActive(path) {
+				active, taskErr := isTaskActive(path)
+				if taskErr != nil {
+					task.Error = taskErr
+					errorTasks = append(errorTasks, task)
+				} else if active {
 					activeTasks = append(activeTasks, task)
 				} else {
 					inactiveTasks = append(inactiveTasks, task)
@@ -99,6 +105,7 @@ func main() {
 
 	printTasks("Active tasks", activeTasks, color.FgGreen)
 	printTasks("Inactive tasks", inactiveTasks, color.FgHiBlack)
+	printTasksWithErrors("Tasks with syntax errors", errorTasks, color.FgRed)
 }
 
 func printHelp() {
@@ -173,6 +180,29 @@ func printTasks(title string, tasks []Task, nameColor color.Attribute) {
 		}
 
 		color.New(color.Reset).Println(")")
+	}
+}
+
+func printTasksWithErrors(title string, tasks []Task, nameColor color.Attribute) {
+	if len(tasks) == 0 {
+		return
+	}
+	color.New(color.FgYellow, color.Bold).Println("\n" + title + ":")
+	for _, task := range tasks {
+		fmt.Print("  - ")
+		color.New(nameColor, color.Bold).Print(task.Name)
+		color.New(color.Reset).Print(" (" + task.RRule)
+		if task.Duration != "" {
+			color.New(color.Reset).Print(", " + task.Duration)
+		}
+		color.New(color.Reset).Print(")")
+
+		// Show error message
+		if task.Error != nil {
+			color.New(color.FgRed).Print(" ❌ " + task.Error.Error())
+		}
+
+		fmt.Println()
 	}
 }
 
@@ -428,10 +458,10 @@ func processFile(path string) Task {
 	return Task{}
 }
 
-func isTaskActive(path string) bool {
+func isTaskActive(path string) (bool, error) {
 	fm, err := parseFrontMatter(path)
 	if err != nil {
-		return false
+		return false, nil // No front matter is not an error
 	}
 
 	if fm.RRule != "" {
@@ -439,13 +469,14 @@ func isTaskActive(path string) bool {
 		startDate := parseStartDate(fm.DTStart)
 		duration, err := parseDuration(fm.Duration)
 		if err != nil {
-			return false
+			return false, fmt.Errorf("duration parsing error: %w", err)
 		}
 
 		// Create RRULE with proper DTSTART
-		r, err := rrule.StrToRRule("DTSTART:" + startDate.Format("20060102T000000Z") + "\nRRULE:" + fm.RRule)
+		rruleStr := "DTSTART:" + startDate.Format("20060102T000000Z") + "\nRRULE:" + fm.RRule
+		r, err := rrule.StrToRRule(rruleStr)
 		if err != nil {
-			return false
+			return false, fmt.Errorf("RRULE parsing error: %w", err)
 		}
 
 		// Get all occurrences from start date to today + duration
@@ -459,17 +490,17 @@ func isTaskActive(path string) bool {
 			occurrenceEnd := occurrenceStart.Add(duration)
 
 			if (today.Equal(occurrenceStart) || today.After(occurrenceStart)) && today.Before(occurrenceEnd) {
-				return true
+				return true, nil
 			}
 		}
 
-		return false
+		return false, nil
 	} else if fm.DTStart != "" {
 		// Handle one-time events
-		return isOneTimeTaskActive(fm)
+		return isOneTimeTaskActive(fm), nil
 	}
 
-	return false
+	return false, nil
 }
 
 func cleanFilename(filename string) string {
