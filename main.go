@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,10 +36,16 @@ type Task struct {
 	NextStart *time.Time
 	DueDate   *time.Time
 	Error     error
+	FilePath  string
 }
 
 type Config struct {
 	NotesDir string `yaml:"notes_dir"`
+}
+
+type VaultInfo struct {
+	Name string
+	Path string
 }
 
 func getNotesDir() string {
@@ -70,6 +77,55 @@ func getNotesDir() string {
 	return ""
 }
 
+func detectVault(notesDir string) *VaultInfo {
+	currentPath := notesDir
+
+	for {
+		// Check if .obsidian folder exists in current directory
+		obsidianPath := filepath.Join(currentPath, ".obsidian")
+		if _, err := os.Stat(obsidianPath); err == nil {
+			// Found .obsidian folder, extract vault name from directory name
+			vaultName := filepath.Base(currentPath)
+			return &VaultInfo{
+				Name: vaultName,
+				Path: currentPath,
+			}
+		}
+
+		// Move up one directory
+		parentPath := filepath.Dir(currentPath)
+
+		// If we've reached the root or can't go further up, stop
+		if parentPath == currentPath || parentPath == "/" || parentPath == "." {
+			break
+		}
+
+		currentPath = parentPath
+	}
+
+	return nil
+}
+
+func createObsidianURI(vaultName, filePath, vaultPath, notesDir string) string {
+	// Calculate relative path from vault root to the file
+	relativeFilePath, _ := filepath.Rel(vaultPath, filePath)
+
+	// Remove .md extension and convert to forward slashes
+	relativeFilePath = strings.TrimSuffix(relativeFilePath, ".md")
+	relativeFilePath = strings.ReplaceAll(relativeFilePath, "\\", "/")
+
+	// URL encode the components (using %20 for spaces, not +)
+	encodedVault := url.PathEscape(vaultName)
+	encodedFile := url.PathEscape(relativeFilePath)
+
+	return fmt.Sprintf("obsidian://open?vault=%s&file=%s", encodedVault, encodedFile)
+}
+
+func createTerminalHyperlink(uri, text string) string {
+	// OSC 8 escape sequence format: \x1b]8;;URI\x1b\\TEXT\x1b]8;;\x1b\\
+	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", uri, text)
+}
+
 func main() {
 	// Check for help flag
 	if len(os.Args) > 1 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
@@ -78,6 +134,12 @@ func main() {
 	}
 
 	root := getNotesDir()
+
+	// Detect Obsidian vault
+	vault := detectVault(root)
+	if vault != nil {
+		color.New(color.FgCyan, color.Bold).Printf("📓 Vault: %s\n", vault.Name)
+	}
 
 	var activeTasks []Task
 	var inactiveTasks []Task
@@ -110,9 +172,9 @@ func main() {
 		return
 	}
 
-	printTasks("Active tasks", activeTasks, color.FgGreen)
-	printTasks("Inactive tasks", inactiveTasks, color.FgHiBlack)
-	printTasksWithErrors("Tasks with syntax errors", errorTasks, color.FgRed)
+	printTasks("Active tasks", activeTasks, color.FgGreen, vault, root)
+	printTasks("Inactive tasks", inactiveTasks, color.FgHiBlack, vault, root)
+	printTasksWithErrors("Tasks with syntax errors", errorTasks, color.FgRed, vault, root)
 }
 
 func printHelp() {
@@ -154,14 +216,22 @@ func printHelp() {
 	fmt.Println("  -h, --help    Show this help message")
 }
 
-func printTasks(title string, tasks []Task, nameColor color.Attribute) {
+func printTasks(title string, tasks []Task, nameColor color.Attribute, vault *VaultInfo, notesDir string) {
 	if len(tasks) == 0 {
 		return
 	}
 	color.New(color.FgYellow, color.Bold).Println("\n" + title + ":")
 	for _, task := range tasks {
 		fmt.Print("  - ")
-		color.New(nameColor, color.Bold).Print(task.Name)
+
+		// Create hyperlink if vault is available
+		if vault != nil && task.FilePath != "" {
+			uri := createObsidianURI(vault.Name, task.FilePath, vault.Path, notesDir)
+			hyperlinkText := createTerminalHyperlink(uri, task.Name)
+			color.New(nameColor, color.Bold).Print(hyperlinkText)
+		} else {
+			color.New(nameColor, color.Bold).Print(task.Name)
+		}
 		color.New(color.Reset).Print(" (" + task.RRule)
 		if task.Duration != "" {
 			color.New(color.Reset).Print(", " + task.Duration)
@@ -190,14 +260,22 @@ func printTasks(title string, tasks []Task, nameColor color.Attribute) {
 	}
 }
 
-func printTasksWithErrors(title string, tasks []Task, nameColor color.Attribute) {
+func printTasksWithErrors(title string, tasks []Task, nameColor color.Attribute, vault *VaultInfo, notesDir string) {
 	if len(tasks) == 0 {
 		return
 	}
 	color.New(color.FgYellow, color.Bold).Println("\n" + title + ":")
 	for _, task := range tasks {
 		fmt.Print("  - ")
-		color.New(nameColor, color.Bold).Print(task.Name)
+
+		// Create hyperlink if vault is available
+		if vault != nil && task.FilePath != "" {
+			uri := createObsidianURI(vault.Name, task.FilePath, vault.Path, notesDir)
+			hyperlinkText := createTerminalHyperlink(uri, task.Name)
+			color.New(nameColor, color.Bold).Print(hyperlinkText)
+		} else {
+			color.New(nameColor, color.Bold).Print(task.Name)
+		}
 		color.New(color.Reset).Print(" (" + task.RRule)
 		if task.Duration != "" {
 			color.New(color.Reset).Print(", " + task.Duration)
@@ -498,12 +576,12 @@ func processFile(path string) Task {
 	if fm.RRule != "" {
 		nextStart := getNextOccurrence(fm)
 		dueDate := getCurrentDueDate(fm)
-		return Task{Name: filename, RRule: fm.RRule, Duration: fm.Duration, NextStart: nextStart, DueDate: dueDate}
+		return Task{Name: filename, RRule: fm.RRule, Duration: fm.Duration, NextStart: nextStart, DueDate: dueDate, FilePath: path}
 	} else if fm.DTStart != "" {
 		// Handle one-time events
 		dueDate := getOneTimeDueDate(fm)
 		startDate := parseStartDate(fm.DTStart)
-		return Task{Name: filename, RRule: "ONCE", Duration: fm.Duration, NextStart: &startDate, DueDate: dueDate}
+		return Task{Name: filename, RRule: "ONCE", Duration: fm.Duration, NextStart: &startDate, DueDate: dueDate, FilePath: path}
 	}
 	return Task{}
 }
